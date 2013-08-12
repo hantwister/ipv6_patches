@@ -1,0 +1,81 @@
+diff -rupN sqlat-1.1.0/include/sqlanlz.h sqlat-1.1.0-ipv6/include/sqlanlz.h
+--- sqlat-1.1.0/include/sqlanlz.h	2004-02-18 12:00:52.000000000 -0500
++++ sqlat-1.1.0-ipv6/include/sqlanlz.h	2013-08-11 13:49:05.193934212 -0400
+@@ -21,7 +21,7 @@
+ #define _SQLANLZ_H
+ 
+ typedef struct args_struct {
+-  char sIP[20];
++  char sIP[50];
+   FILE *pIPFile;
+   int nPort;
+   FILE *pRepFile;
+diff -rupN sqlat-1.1.0/include/sqldict.h sqlat-1.1.0-ipv6/include/sqldict.h
+--- sqlat-1.1.0/include/sqldict.h	2004-02-18 12:00:52.000000000 -0500
++++ sqlat-1.1.0-ipv6/include/sqldict.h	2013-08-11 13:48:23.413935003 -0400
+@@ -20,7 +20,7 @@
+ #include <stdio.h>
+ 
+ typedef struct args_struct {
+-  char sIP[20];
++  char sIP[50];
+   FILE *pUserFile;
+   FILE *pPassFile;
+   FILE *pIPFile;
+diff -rupN sqlat-1.1.0/include/sqldumplogins.h sqlat-1.1.0-ipv6/include/sqldumplogins.h
+--- sqlat-1.1.0/include/sqldumplogins.h	2004-02-18 12:00:52.000000000 -0500
++++ sqlat-1.1.0-ipv6/include/sqldumplogins.h	2013-08-11 13:49:14.537934036 -0400
+@@ -21,7 +21,7 @@
+ #define _SQLDUMPLOGINS_H
+ 
+ typedef struct args_struct {
+-  char sIP[20];
++  char sIP[50];
+   FILE *pIPFile;
+   FILE *pRepFile;
+   int  nPort;
+diff -rupN sqlat-1.1.0/include/sqlsamdump.h sqlat-1.1.0-ipv6/include/sqlsamdump.h
+--- sqlat-1.1.0/include/sqlsamdump.h	2004-02-18 12:00:52.000000000 -0500
++++ sqlat-1.1.0-ipv6/include/sqlsamdump.h	2013-08-11 13:49:35.569933637 -0400
+@@ -24,7 +24,7 @@ void tds_free_login(TDSLOGIN *);
+ typedef unsigned char byte;
+ 
+ struct args_struct {
+-  char sIP[25];
++  char sIP[50];
+   FILE *pIPFile;
+   int  nPort;
+   char sUser[50];
+diff -rupN sqlat-1.1.0/include/sqlupload.h sqlat-1.1.0-ipv6/include/sqlupload.h
+--- sqlat-1.1.0/include/sqlupload.h	2004-02-18 12:00:52.000000000 -0500
++++ sqlat-1.1.0-ipv6/include/sqlupload.h	2013-08-11 13:49:42.273933511 -0400
+@@ -24,7 +24,7 @@ void tds_free_login(TDSLOGIN *);
+ typedef unsigned char byte;
+ 
+ struct args_struct {
+-  char sIP[20];
++  char sIP[50];
+   char filename[1024];
+   char sUser[50];
+   char sPass[50];
+diff -rupN sqlat-1.1.0/sqldict.c sqlat-1.1.0-ipv6/sqldict.c
+--- sqlat-1.1.0/sqldict.c	2004-04-20 13:15:26.000000000 -0400
++++ sqlat-1.1.0-ipv6/sqldict.c	2013-08-11 13:53:00.725929754 -0400
+@@ -81,7 +81,7 @@ int doHack(const ARGS *pArgs) {
+   TDSCONNECTINFO *connect_info;
+   char user[64];
+   char pass[64];
+-  char ip[16];
++  char ip[50];
+   int  exitFlag = FALSE;
+   const char* p;
+ 
+@@ -96,7 +96,7 @@ int doHack(const ARGS *pArgs) {
+   while (exitFlag == FALSE) {
+     
+     if (pArgs->pIPFile == NULL) {
+-      memset(ip, 0, 16);
++      memset(ip, 0, sizeof(ip));
+       strncpy(ip,pArgs->sIP,strlen(pArgs->sIP));
+       exitFlag = TRUE;
+     } else

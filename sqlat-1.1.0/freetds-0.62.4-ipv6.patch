@@ -1,0 +1,316 @@
+diff -rupN freetds-0.62.4/src/tds/config.c freetds-0.62.4-ipv6/src/tds/config.c
+--- freetds-0.62.4/src/tds/config.c	2003-12-09 05:19:17.000000000 -0500
++++ freetds-0.62.4-ipv6/src/tds/config.c	2013-08-12 09:38:42.308583124 -0400
+@@ -967,6 +967,108 @@ parse_server_name_for_port(TDSCONNECTINF
+ 	char *server;
+ 
+ 	/* seek the ':' in login server_name */
++
++	// CHANGES:
++	// : in IPv6 doesn't always mean port number, so change this code.
++
++	int toReturn;
++
++	server = tds_dstr_cstr(&login->server_name);
++	pEnd = server + strlen(server);
++
++	if (*server == '[') {
++		// This is IPv6. The end will either be ]:<port #> or simply ].
++
++		char *ipStart, *ipEnd;
++
++		ipStart = server + 1;
++
++		if (*(pEnd - 1) == ']') {
++			// No port number.
++			ipEnd = pEnd - 1;
++			toReturn = 0;
++		} else {
++			// Find the :, which indicates the start of the port #.
++			for (pSep = pEnd - 1; *pSep != ':'; pSep--);
++			login->port = connect_info->port = atoi(pSep + 1);
++			ipEnd = pSep - 1; // The ], which marks the end of the IP is behind the :
++			toReturn = 1;
++		}
++
++		if (!tds_dstr_copyn(&connect_info->server_name, ipStart, ipEnd - ipStart)) {
++			free(server);
++			return 0;
++		}
++
++		// Because of changes in tds_connect (where we do lookups),
++		// tds_lookup_host shouldn't be necessary
++
++		if (!tds_dstr_copyn(&connect_info->ip_addr, ipStart, ipEnd - ipStart)) {
++			free(server);
++			return 0;
++		}
++	} else {
++		// This *may* or *may not* be IPv6. If more than one :, IPv6.
++		// Otherwise, IPv4.
++
++		char *firstColon;
++
++		for (pSep = server, firstColon = NULL; pSep < pEnd; pSep++) {
++			if (*pSep == ':') {
++				if (firstColon) {
++					break;
++				} else {
++					firstColon = pSep;
++				}
++			}
++		}
++
++		if (pSep < pEnd) { // Did the for loop break (was more than one : found)
++			// The entire string is IPv6, no port.
++
++			if (!tds_dstr_copyn(&connect_info->server_name, server, pEnd - server)) {
++				free(server);
++				return 0;
++			}
++
++			if (!tds_dstr_copyn(&connect_info->ip_addr, server, pEnd - server)) {
++				free(server);
++				return 0;
++			}
++		} else {
++			// The string is IPv4 or a hostname. If firstColon is NULL, no port.
++			// If firstColon isn't NULL, port afterwards.
++
++			if (firstColon) {
++				login->port = connect_info->port = atoi(firstColon + 1);
++
++				if (!tds_dstr_copyn(&connect_info->server_name, server, firstColon - server)) {
++					free(server);
++					return 0;
++				}
++
++				if (!tds_dstr_copyn(&connect_info->ip_addr, server, firstColon - server)) {
++					free(server);
++					return 0;
++				}
++
++				toReturn = 1;
++			} else {
++				if (!tds_dstr_copyn(&connect_info->ip_addr, server, pEnd - server)) {
++					free(server);
++					return 0;
++				}
++
++				toReturn = 0;
++			}
++		}
++	}
++
++	free(server);
++	return toReturn;
++
++	// OLD CODE:
++
+ 	server = tds_dstr_cstr(&login->server_name);
+ 	pEnd = server + strlen(server);
+ 	for (pSep = server; pSep < pEnd; pSep++)
+diff -rupN freetds-0.62.4/src/tds/login.c freetds-0.62.4-ipv6/src/tds/login.c
+--- freetds-0.62.4/src/tds/login.c	2004-03-18 05:30:21.000000000 -0500
++++ freetds-0.62.4-ipv6/src/tds/login.c	2013-08-12 09:47:48.660572782 -0400
+@@ -89,6 +89,9 @@
+ #include <dmalloc.h>
+ #endif
+ 
++// CHANGES: Add netdb.h include
++#include <netdb.h>
++
+ static char software_version[] = "$Id: login.c,v 1.118.2.1 2004/03/18 10:30:21 freddy77 Exp $";
+ static void *no_unused_var_warn[] = { software_version, no_unused_var_warn };
+ 
+@@ -208,7 +211,7 @@ tds_set_capabilities(TDSLOGIN * tds_logi
+ int
+ tds_connect(TDSSOCKET * tds, TDSCONNECTINFO * connect_info)
+ {
+-	struct sockaddr_in sin;
++	//struct sockaddr_in sin;
+ 
+ 	/* Jeff's hack - begin */
+ 	unsigned long ioctl_blocking = 1;
+@@ -278,6 +281,7 @@ tds_connect(TDSSOCKET * tds, TDSCONNECTI
+ 		tds_free_socket(tds);
+ 		return TDS_FAIL;
+ 	}
++/*
+ 	sin.sin_addr.s_addr = inet_addr(tds_dstr_cstr(&connect_info->ip_addr));
+ 	if (sin.sin_addr.s_addr == INADDR_NONE) {
+ 		tdsdump_log(TDS_DBG_ERROR, "%L inet_addr() failed, IP = %s\n", connect_info->ip_addr);
+@@ -287,20 +291,65 @@ tds_connect(TDSSOCKET * tds, TDSCONNECTI
+ 
+ 	sin.sin_family = AF_INET;
+ 	sin.sin_port = htons(connect_info->port);
++*/
+ 
+-	memcpy(tds->capabilities, connect_info->capabilities, TDS_MAX_CAPABILITY);
++	// CHANGES:
++	// Above commented out, replaced with Linux lookup below
++
++	struct addrinfo lookupHints;
++	lookupHints.ai_flags = 0;
++	lookupHints.ai_family = PF_UNSPEC;
++	lookupHints.ai_socktype = SOCK_STREAM;
++	lookupHints.ai_protocol = IPPROTO_TCP;
++
++	struct addrinfo *lookupResults;
++	char service[6];
++	snprintf(service, 6, "%i", connect_info->port);
++
++	int lookupStatus;
++	lookupStatus = getaddrinfo(
++		connect_info->ip_addr,
++		service,
++		&lookupHints,
++		&lookupResults
++		);
+ 
++	if (lookupStatus) {
++		tdsdump_log(TDS_DBG_ERROR, "%L getaddrinfo() failed, IP = %s\n", connect_info->ip_addr);
++		tds_free_socket(tds);
++		return TDS_FAIL;
++	}
++
++	// don't forget to call freeaddrinfo(lookupResults)
++
++	// END CHANGES
++
++	memcpy(tds->capabilities, connect_info->capabilities, TDS_MAX_CAPABILITY);
+ 
+ 	retval = tds_version(tds, version);
+ 	if (!retval)
+ 		version[0] = '\0';
+ 
+-	tdsdump_log(TDS_DBG_INFO1, "%L Connecting to %s port %d, TDS %s.\n", inet_ntoa(sin.sin_addr), ntohs(sin.sin_port), version);
+-	if (TDS_IS_SOCKET_INVALID(tds->s = socket(AF_INET, SOCK_STREAM, 0))) {
++	// CHANGES:
++	// Replace socket code below to reference lookup results.
++
++	tdsdump_log(TDS_DBG_INFO1, "%L Connecting to %s port %s, TDS %s.\n", connect_info->ip_addr, service, version);
++	if (TDS_IS_SOCKET_INVALID(
++		tds->s = socket(
++			lookupResults->ai_family,
++			lookupResults->ai_socktype,
++			lookupResults->ai_protocol
++			)
++		)
++	) {
+ 		perror("socket");
+ 		tds_free_socket(tds);
++		freeaddrinfo(lookupResults);
+ 		return TDS_FAIL;
+ 	}
++
++	// END CHANGES
++
+ #ifdef SO_LINGER
+ 	linger_opt.l_onoff = 1;
+ 	linger_opt.l_linger = 0;
+@@ -320,21 +369,36 @@ tds_connect(TDSSOCKET * tds, TDSCONNECTI
+ 	setsockopt(tds->s, IPPROTO_TCP, TCP_NODELAY, (const void *) &len, sizeof(len));
+ #endif
+ #endif
+-	
++
++	// CHANGES: Before any return statement, add a call to freeaddrinfo
++	// Changes continue until end of function
++
+ 	/* Jeff's hack *** START OF NEW CODE *** */
+ 	if (connect_timeout) {
+ 		start = time(NULL);
+ 		ioctl_blocking = 1;	/* ~0; //TRUE; */
+ 		if (IOCTLSOCKET(tds->s, FIONBIO, &ioctl_blocking) < 0) {
+ 			tds_free_socket(tds);
++			freeaddrinfo(lookupResults);
+ 			return TDS_FAIL;
+ 		}
+-		retval = connect(tds->s, (struct sockaddr *) &sin, sizeof(sin));
++
++		// CHANGES: Change connect call to use earlier lookup results
++
++		retval = connect(
++			tds->s,
++			lookupResults->ai_addr,
++			lookupResults->ai_addrlen
++			);
++
++		// END CHANGES
++
+ 		if (retval < 0 && sock_errno == TDSSOCK_EINPROGRESS)
+ 			retval = 0;
+ 		if (retval < 0) {
+ 			perror("src/tds/login.c: tds_connect (timed)");
+ 			tds_free_socket(tds);
++			freeaddrinfo(lookupResults);
+ 			return TDS_FAIL;
+ 		}
+ 		/* Select on writeability for connect_timeout */
+@@ -352,17 +416,27 @@ tds_connect(TDSSOCKET * tds, TDSCONNECTI
+ 		if ((now - start) >= connect_timeout) {
+ 			tds_client_msg(tds->tds_ctx, tds, 20009, 9, 0, 0, "Server is unavailable or does not exist.");
+ 			tds_free_socket(tds);
++			freeaddrinfo(lookupResults);
+ 			return TDS_FAIL;
+ 		}
+-	} else if (connect(tds->s, (struct sockaddr *) &sin, sizeof(sin)) < 0) {
++
++	// CHANGES: Change references to sin (connect, asprintf, ) to use earlier lookup results
++
++	} else if (connect(
++		tds->s,
++		lookupResults->ai_addr,
++		lookupResults->ai_addrlen
++		) < 0
++	) {
+ 		char *message;
+ 
+-		if (asprintf(&message, "src/tds/login.c: tds_connect: %s:%d", inet_ntoa(sin.sin_addr), ntohs(sin.sin_port)) >= 0) {
++		if (asprintf(&message, "src/tds/login.c: tds_connect: %s:%s", connect_info->ip_addr, service) >= 0) {
+ 			perror(message);
+ 			free(message);
+ 		}
+ 		tds_client_msg(tds->tds_ctx, tds, 20009, 9, 0, 0, "Server is unavailable or does not exist.");
+ 		tds_free_socket(tds);
++		freeaddrinfo(lookupResults);
+ 		return TDS_FAIL;
+ 	}
+ 	/* END OF NEW CODE */
+@@ -379,6 +453,7 @@ tds_connect(TDSSOCKET * tds, TDSCONNECTI
+ 		tds_close_socket(tds);
+ 		tds_client_msg(tds->tds_ctx, tds, 20014, 9, 0, 0, "Login incorrect.");
+ 		tds_free_socket(tds);
++		freeaddrinfo(lookupResults);
+ 		return TDS_FAIL;
+ 	}
+ 
+@@ -386,6 +461,7 @@ tds_connect(TDSSOCKET * tds, TDSCONNECTI
+ 		len = 64 + tds_quote_id(tds, NULL, tds_dstr_cstr(&connect_info->database),-1);
+ 		if ((str = (char *) malloc(len)) == NULL) {
+ 			tds_free_socket(tds);
++			freeaddrinfo(lookupResults);
+ 			return TDS_FAIL;
+ 		}
+ 		str[0] = 0;
+@@ -400,16 +476,19 @@ tds_connect(TDSSOCKET * tds, TDSCONNECTI
+ 		free(str);
+ 		if (retval != TDS_SUCCEED) {
+ 			tds_free_socket(tds);
++			freeaddrinfo(lookupResults);
+ 			return TDS_FAIL;
+ 		}
+ 
+ 		if (tds_process_simple_query(tds) != TDS_SUCCEED) {
+ 			tds_free_socket(tds);
++			freeaddrinfo(lookupResults);
+ 			return TDS_FAIL;
+ 		}
+ 	}
+ 
+ 	tds->connect_info = NULL;
++	freeaddrinfo(lookupResults);
+ 	return TDS_SUCCEED;
+ }
+ 
